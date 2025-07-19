@@ -37,10 +37,76 @@
 
 void do_asciiart()
 {
-	char *p = asciiart;
-	while (*p)
-		console_putch(*p++);
-	printf(asciitail);
+	//char *p = asciiart;
+	//while (*p)
+	//	console_putch(*p++);
+	//printf(asciitail);
+
+   char * consoleRev = "";
+   char * processorRev = "";
+
+   printf("   XeLL Medallion BIOS v6.0, An Energy Star Ally\n   Copyright (C) 2007-2025 " BLAME ", free60.org\n\n" );
+
+   for(int i = 0; i<BIOSLOGO_HEIGHT; i++)
+   {
+      for(int j = 0; j<BIOSLOGO_WIDTH; j++)
+      {
+         if(bioslogo[(i * BIOSLOGO_WIDTH) + j])
+         {
+            console_pset(j, i, 0, 0, 255);
+         }
+      }
+   }
+
+   for(int i = 0; i<ENERGY_HEIGHT; i++)
+   {
+      for(int j = 0; j<ENERGY_WIDTH; j++)
+      {
+         char nrgpixel = energylogo[(i * ENERGY_WIDTH) + j];
+
+         if(nrgpixel == 0xaa)
+         {
+            console_pset_right(j, i, 255, 255, 0);
+         }
+         else if(nrgpixel == 0x55)
+         {
+            console_pset_right(j, i, 0, 255, 0);
+         }
+      }
+   }
+
+   if (xenon_get_console_type() == 0) {
+	    consoleRev = "Xenon";
+       processorRev = "Waternoose";
+    } else if (xenon_get_console_type() == 1) {
+	    consoleRev = "Zephyr";
+       processorRev = "Waternoose";
+    } else if (xenon_get_console_type() == 2) {
+	   consoleRev = "Falcon";
+      processorRev = "Loki";
+    } else if (xenon_get_console_type() == 3) {
+	    consoleRev = "Jasper";
+       processorRev = "Loki";
+    } else if (xenon_get_console_type() == 4) {
+	    consoleRev = "Trinity";
+       processorRev = "Vejle";
+    } else if (xenon_get_console_type() == 5) {
+	    consoleRev = "Corona";
+       processorRev = "Vejle";
+    } else if (xenon_get_console_type() == 6) {
+	    consoleRev = "Corona MMC";
+       processorRev = "Vejle";
+    } else if (xenon_get_console_type() == 7) {
+	    consoleRev = "Winchester";
+       processorRev = "Oban";
+    } else{
+	    consoleRev = "Unknown";
+       processorRev = "Unknown";
+    }
+
+   printf("Microsoft %s ACPI BIOS Revision " VERSION "\n\n", consoleRev);
+   printf("Microsoft %s %08x 3.2GHz Processor\n", processorRev, mfspr(287));
+   printf("Memory Test :  524288K OK\n\n");
 }
 
 void dumpana() {
@@ -56,6 +122,10 @@ void dumpana() {
 }
 
 char FUSES[350]; /* this string stores the ascii dump of the fuses */
+char CBLDV[17]; // 16 + terminate
+char FGLDV[80];
+int cbldvcount;
+int fgldvcount;
 
 unsigned char stacks[6][0x10000];
 
@@ -86,6 +156,7 @@ void synchronize_timebases()
 int main(){
 	LogInit();
 	int i;
+   int rc = 0;
 
 	printf("ANA Dump before Init:\n");
 	dumpana();
@@ -113,70 +184,116 @@ int main(){
 #elif defined XTUDO_THEME
 	console_set_colors(CONSOLE_COLOR_BLACK,CONSOLE_COLOR_PINK); // Pink text on black bg
 #elif defined DEFAULT_THEME
-	console_set_colors(CONSOLE_COLOR_BLUE,CONSOLE_COLOR_WHITE); // White text on blue bg
+	console_set_colors(CONSOLE_COLOR_BLACK,CONSOLE_COLOR_GREY); // White text on blue bg
 #else
 	console_set_colors(CONSOLE_COLOR_BLACK,CONSOLE_COLOR_GREEN); // Green text on black bg
 #endif
 	console_init();
 
-	printf("\nXeLL - Xenon linux loader second stage " LONGVERSION "\n");
-    printf("\nBuilt with GCC " GCC_VERSION " and Binutils " BINUTILS_VERSION " \n");
-	do_asciiart();
+   delay(2);
 
-	//delay(3); //give the user a chance to see our splash screen <- network init should last long enough...
-	
+   console_clrscr();
+
+  	do_asciiart();
+
 	xenon_sound_init();
 
 	xenon_make_it_faster(XENON_SPEED_FULL);
+
+	// FIXME: Not initializing these devices here causes an interrupt storm in
+	// linux.
+   printf("\n");
+	printf("Detecting Primary Master  ... ");
+	xenon_ata_init();
+   printf("Detecting Primary Slave   ... None\n");
+
+#ifndef NO_DVD
+	printf("Detecting Secondary Master... ");
+	xenon_atapi_init();
+   printf("Detecting Secondary Slave ... None\n");
+#endif
+
+	mount_all_devices();
+
+   printf("\n");
+
 	if (xenon_get_console_type() != REV_CORONA_PHISON) //Not needed for MMC type of consoles! ;)
 	{
-		printf(" * nand init\n");
+		printf("NAND init... ");
 		sfcx_init();
 		if (sfc.initialized != SFCX_INITIALIZED)
 		{
-			printf(" ! sfcx initialization failure\n");
-			printf(" ! nand related features will not be available\n");
+			PRINT_ERR("failure, NAND features unavailable\n");
 			delay(5);
 		}
+      else
+      {
+         PRINT_SUCCESS("success\n")
+      }
 	}
 
 	xenon_config_init();
 
 #ifndef NO_NETWORKING
 
-	printf(" * network init\n");
-	network_init();
+	printf("Network init... ");
 
-	printf(" * starting httpd server...");
+   console_close();
+	rc = network_init();
+   console_open();
+
+   if(NETWORK_INIT_SUCCESS == rc)
+   {
+      PRINT_SUCCESS("success\n");
+   }
+   else if(NETWORK_INIT_STATIC_IP == rc)
+   {
+      PRINT_WARN("static ip assigned\n");
+   }
+   else
+   {
+      PRINT_ERR("failed\n");
+   }
+
+   
+
+	printf("starting httpd server... ");
+
+   console_close();
 	httpd_start();
-	printf("success\n");
+   console_open();
+
+	PRINT_SUCCESS("success\n");
 
 #endif
 
-	printf(" * usb init\n");
-	usb_init();
+	printf("USB init... ");
+
+   console_close();
+
+	rc = usb_init();
 	usb_do_poll();
 
-	// FIXME: Not initializing these devices here causes an interrupt storm in
-	// linux.
-	printf(" * sata hdd init\n");
-	xenon_ata_init();
+   console_open();
 
-#ifndef NO_DVD
-	printf(" * sata dvd init\n");
-	xenon_atapi_init();
-#endif
+   if(0 == rc)
+   {
+      PRINT_SUCCESS("success\n");
+   }
+   else
+   {
+      PRINT_ERR("failed\n");
+   }
 
-	mount_all_devices();
-	
 	/*int device_list_size = */ // findDevices();
 
-	/* display some cpu info */
-	printf(" * CPU PVR: %08x\n", mfspr(287));
-
 #ifndef NO_PRINT_CONFIG
-	printf(" * FUSES - write them down and keep them safe:\n");
+   printf("\n");
+	printf("FUSES - write them down and keep them safe:\n");
 	char *fusestr = FUSES;
+   char *cbldvstr = CBLDV;
+   char *fgldvstr = FGLDV;
+
 	for (i=0; i<12; ++i){
 		u64 line;
 		unsigned int hi,lo;
@@ -185,12 +302,52 @@ int main(){
 		hi=line>>32;
 		lo=line&0xffffffff;
 
-		fusestr += sprintf(fusestr, "fuseset %02d: %08x%08x\n", i, hi, lo);
+      if( i % 2 == 0 )
+      {
+         fusestr += sprintf(fusestr, "%02d: %08x%08x ", i, hi, lo);
+      }
+      else
+      {
+		   fusestr += sprintf(fusestr, "%02d: %08x%08x\n", i, hi, lo);
+      }
+		
+	   if (i >= 7)
+      {
+		   fgldvstr += sprintf(fgldvstr, "%08x%08x", hi, lo) + '\0';
+	   }
+      
+      if (i == 2)
+      {
+         cbldvstr += sprintf(cbldvstr, "%08x%08x", hi, lo);
+      }
 	}
+
+   for (i = 0; CBLDV[i] != '\0' ; ++i)
+   {
+      if ('f' == CBLDV[i])
+      {
+         cbldvcount = i + 1;
+      }
+   }
+
+   for (i = 0; FGLDV[i] != '\0'; ++i)
+   {
+	   if ('f' == FGLDV[i])
+      {
+		   ++fgldvcount;
+	   }
+   }
+
 	printf(FUSES);
 
 	print_cpu_dvd_keys();
+
+   printf(" * CB LDV: %d\n", cbldvcount);
+   printf(" * CF/CG LDV: %d\n\n", fgldvcount);
+
 	network_print_config();
+
+
 #endif
 	/* Stop logging and save it to first USB Device found that is writeable */
 	LogDeInit();
@@ -211,13 +368,14 @@ int main(){
 	ip_addr_t fallback_address;
 	ip4_addr_set_u32(&fallback_address, 0xC0A8015A); // 192.168.1.90
 
-	printf("\n * Looking for files on TFTP...\n\n");
 	for(;;){
-		tftp_loop(boot_server_name()); //less likely to find something...
-		tftp_loop(fallback_address);
 		fileloop();
-		
+
 		console_clrline();
+
+      console_close();
+      usb_do_poll();
+      console_open();
 	}
 
 	return 0;
