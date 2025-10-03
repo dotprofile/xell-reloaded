@@ -374,15 +374,15 @@ int main(){
 	ip_addr_t fallback_address;
 	ip4_addr_set_u32(&fallback_address, 0xC0A8015A); // 192.168.1.90
 
+   printf("Scanning for boot devices...\n");
+
 	for(;;){
-      printf("Scanning for boot devices...");
 
       console_close();
+      network_poll();
       usb_do_poll();
       mount_all_devices();
       console_open();
-
-      delay(1);
 
       console_clrline();
 
