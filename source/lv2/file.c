@@ -40,6 +40,7 @@ struct filenames filelist[] = {{"kboot.conf", TYPE_KBOOT},
                                {"vmlinux", TYPE_ELF},
                                {"updxell.bin",TYPE_UPDXELL},
                                {"updflash.bin",TYPE_NANDIMAGE},
+                               {"updflash_force.bin",TYPE_NANDIMAGE_FORCE},
                                {NULL, TYPE_INVALID}};
 
 void wait_and_cleanup_line() {
@@ -110,6 +111,16 @@ int try_load_file(char *filename, int filetype) {
     return -1;
   }
 
+  // In some instances, e.g. DevGL images or Jasper GPU retrofits on XSB consoles
+  // (Falcon, Zephyr, Xenon) we may be intentionally flashing an image with metadata
+  // that does not match what is expected for the console type. To allow XeLL to update
+  // such consoles, name the NAND image updflash_force.bin to ignore the metadata and
+  // flash the image anyway
+  if (filetype == TYPE_NANDIMAGE_FORCE) {
+    try_rawflash_internal(filename, 1);
+    return -1;
+  }
+
   if (filetype == TYPE_UPDXELL) {
     updateXeLL(filename);
     return -1;
@@ -171,7 +182,8 @@ void fileloop() {
         sprintf(filepath, "%s:/%s", devoptab_list[i]->name,
                 filelist[j].filename);
         if ((filelist[j].filetype == TYPE_UPDXELL ||
-             filelist[j].filetype == TYPE_NANDIMAGE) &&
+             filelist[j].filetype == TYPE_NANDIMAGE ||
+             filelist[j].filetype == TYPE_NANDIMAGE_FORCE ) &&
             (xenon_get_console_type() == REV_CORONA_PHISON)) {
           wait_and_cleanup_line();
           printf("MMC Console Detected! Skipping %s...\r", filepath);
@@ -190,7 +202,8 @@ void tftp_loop(ip_addr_t server) {
   int i = 0;
   do {
     if ((filelist[i].filetype == TYPE_UPDXELL ||
-         filelist[i].filetype == TYPE_NANDIMAGE) &&
+         filelist[i].filetype == TYPE_NANDIMAGE ||
+         filelist[i].filetype == TYPE_NANDIMAGE_FORCE ) &&
         (xenon_get_console_type() == REV_CORONA_PHISON)) {
       wait_and_cleanup_line();
       printf("Skipping TFTP %s:%s... MMC Detected!\r", ipaddr_ntoa(&server),
