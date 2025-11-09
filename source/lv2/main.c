@@ -350,7 +350,7 @@ int main(){
 
    print_cpu_dvd_keys();
 
-   printf("P:0x%08X, X:0x%08X, D:0x%08X, V:0x%08X\n",xenon_get_PCIBridgeRevisionID(),xenon_get_XenosID(),xenon_get_DVE(),xenon_get_CPU_PVR());
+   //printf(" * P:0x%08X, X:0x%08X, D:0x%08X, V:0x%08X\n\n",xenon_get_PCIBridgeRevisionID(),xenon_get_XenosID(),xenon_get_DVE(),xenon_get_CPU_PVR());
 
 	network_print_config();
 
