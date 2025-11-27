@@ -32,7 +32,7 @@
 #include "config.h"
 #include "file.h"
 
-#ifdef FS_TFTP
+#ifndef NO_TFTP
 #include "tftp/tftp.h"
 #endif
 
@@ -214,12 +214,12 @@ int main(){
 	ip_addr_t fallback_address;
 	ip4_addr_set_u32(&fallback_address, 0xC0A8015A); // 192.168.1.90
 
-#ifdef FS_TFTP
+#ifndef NO_TFTP
 	printf("\n * Looking for files on TFTP...\n\n");
 #endif
 
    for(;;){
-      #ifdef FS_TFTP
+      #ifndef NO_TFTP
          //less likely to find something...
 		   tftp_loop(boot_server_name());
 		   tftp_loop(fallback_address);
