@@ -215,7 +215,9 @@ int main(){
 	ip4_addr_set_u32(&fallback_address, 0xC0A8015A); // 192.168.1.90
 
 #ifndef NO_TFTP
-	printf("\n * Looking for files on TFTP...\n\n");
+	printf("\n * Looking for files on TFTP and local media...\n\n");
+#else
+	printf("\n * Looking for files on local media...\n\n");
 #endif
 
    for(;;){
@@ -226,7 +228,7 @@ int main(){
       #else
          // If TFTP support isn't enabled
          // the network still needs to be
-         // poll'ed for the web interface 
+         // polled for the web interface 
          network_poll();
       #endif
 
