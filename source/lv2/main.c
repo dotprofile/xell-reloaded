@@ -384,9 +384,9 @@ int main(){
 	ip4_addr_set_u32(&fallback_address, 0xC0A8015A); // 192.168.1.90
 
 #ifndef NO_TFTP
-	printf("\n * Looking for files on TFTP and local media...\n\n");
+	printf("\nScanning for boot devices on TFTP and local media...\n\n");
 #else
-	printf("\n * Looking for files on local media...\n\n");
+	printf("\nScanning for boot devices...\n\n");
 #endif
 
    for(;;){
