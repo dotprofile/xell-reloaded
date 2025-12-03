@@ -112,7 +112,12 @@ void do_asciiart()
 
    printf("Microsoft %s ACPI BIOS Revision " VERSION "\n\n", consoleRev);
    printf("Microsoft %s %08x 3.2GHz Processor\n", processorRev, mfspr(287));
-   printf("Memory Test :  524288K OK\n\n");
+
+   uint32_t memSizeK = 0;
+
+   memSizeK = xenon_get_ram_size() / 0x400; 
+   
+   printf("Memory Test :  %dK OK\n\n",memSizeK);
 }
 
 void dumpana() {
@@ -256,7 +261,7 @@ int main(){
    {
       PRINT_SUCCESS("success\n");
    }
-   else if(NETWORK_INIT_STATIC_IP == rc)
+   else if(NETWORK_INIT_DHCP_FAILURE == rc)
    {
       PRINT_WARN("static ip assigned\n");
    }
