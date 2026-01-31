@@ -211,6 +211,13 @@ int main(){
 	ip_addr_t fallback_address;
 	ip4_addr_set_u32(&fallback_address, 0xC0A8015A); // 192.168.1.90
 
+	uint32_t ram_bytes = xenon_get_ram_size();
+	uint32_t ram_mib   = ram_bytes >> 20;
+
+	printf("Detected RAM size: 0x%x (%u MiB); patching device tree\n",
+       (unsigned int)ram_bytes,
+       (unsigned int)ram_mib);
+
 	printf("\n * Looking for files on TFTP...\n\n");
 	for(;;){
 		tftp_loop(boot_server_name()); //less likely to find something...
