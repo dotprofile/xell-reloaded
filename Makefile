@@ -1,92 +1,225 @@
-CROSS=xenon-
-CC=$(CROSS)gcc
-OBJCOPY=$(CROSS)objcopy
-LD=$(CROSS)ld
-AS=$(CROSS)as
-STRIP=$(CROSS)strip
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-LV1_DIR=source/lv1
-GITREV='$(shell git describe --tags)'
+#include <debug.h>
+#include <xenos/xenos.h>
+#include <console/console.h>
+#include <time/time.h>
+#include <ppc/timebase.h>
+#include <usb/usbmain.h>
+#include <sys/iosupport.h>
+#include <ppc/register.h>
+#include <xenon_nand/xenon_sfcx.h>
+#include <xenon_nand/xenon_config.h>
+#include <xenon_soc/xenon_secotp.h>
+#include <xenon_soc/xenon_power.h>
+#include <xenon_soc/xenon_io.h>
+#include <xenon_sound/sound.h>
+#include <xenon_smc/xenon_smc.h>
+#include <xenon_smc/xenon_gpio.h>
+#include <xb360/xb360.h>
+#include <network/network.h>
+#include <httpd/httpd.h>
+#include <diskio/ata.h>
+#include <elf/elf.h>
+#include <version.h>
+#include <byteswap.h>
 
-# Configuration
-CFLAGS = -Wall -Os -I$(LV1_DIR) -ffunction-sections -fdata-sections \
-	-m64 -mno-toc -DBYTE_ORDER=BIG_ENDIAN -mno-altivec -D$(CURRENT_TARGET) $(CYGNOS_DEF)
+#include "asciiart.h"
+#include "config.h"
+#include "file.h"
+#include "tftp/tftp.h"
 
-AFLAGS = -Iinclude -m64
-LDFLAGS = -nostdlib -n -m64 -Wl,--gc-sections
+#include "log.h"
 
-OBJS =	$(LV1_DIR)/startup.o \
-	$(LV1_DIR)/main.o \
-	$(LV1_DIR)/cache.o \
-	$(LV1_DIR)/ctype.o \
-	$(LV1_DIR)/string.o \
-	$(LV1_DIR)/time.o \
-	$(LV1_DIR)/vsprintf.o \
-	$(LV1_DIR)/puff/puff.o
+void do_asciiart()
+{
+	char *p = asciiart;
+	while (*p)
+		console_putch(*p++);
+	printf(asciitail);
+}
 
-TARGETS = xell-1f xell-2f xell-gggggg xell-gggggg_cygnos_demon xell-1f_cygnos_demon xell-2f_cygnos_demon
+void dumpana() {
+	int i;
+	for (i = 0; i < 0x100; ++i)
+	{
+		uint32_t v;
+		xenon_smc_ana_read(i, &v);
+		printf("0x%08x, ", (unsigned int)v);
+		if ((i&0x7)==0x7)
+			printf(" // %02x\n", (unsigned int)(i &~0x7));
+	}
+}
 
-# Build rules
-all: $(foreach name,$(TARGETS),$(addprefix $(name).,build))
+char FUSES[350]; /* this string stores the ascii dump of the fuses */
 
-.PHONY: clean %.build
+unsigned char stacks[6][0x10000];
 
-clean:
-	@echo Cleaning...
-	@$(MAKE) --no-print-directory -f Makefile_lv2.mk clean
-	@rm -rf $(OBJS) $(foreach name,$(TARGETS),$(addprefix $(name).,bin elf)) stage2.elf32.gz stage2.elf32.7z
+void reset_timebase_task()
+{
+	mtspr(284,0); // TBLW
+	mtspr(285,0); // TBUW
+	mtspr(284,0);
+}
+
+void synchronize_timebases()
+{
+	xenon_thread_startup();
 	
-dist: clean all
-	@rm -rf XeLL_Reloaded-2stages-*.tar.gz
-	@mkdir -p release/_DEBUG
-	@cp *.bin release/
-	@gunzip *.gz
-	@cp stage2.elf release/_DEBUG
-	@cp stage2.elf32 release/
-	@cp AUTHORS release/
-	@cp CHANGELOG release/
-	@cp README release/
-	@cd release; tar czvf XeLL_Reloaded-2stages-$(GITREV).tar.gz *; mv *.tar.gz ..
-	@rm -rf release 
-	@$(MAKE) clean
+	std((void*)0x200611a0,0); // stop timebase
+	
+	int i;
+	for(i=1;i<6;++i){
+		xenon_run_thread_task(i,&stacks[i][0xff00],(void *)reset_timebase_task);
+		while(xenon_is_thread_task_running(i));
+	}
+	
+	reset_timebase_task(); // don't forget thread 0
+			
+	std((void*)0x200611a0,0x1ff); // restart timebase
+}
+	
+int main(){
+	LogInit();
+	int i;
 
-%.build:
-	@echo Building $* ...
-	@$(MAKE) --no-print-directory $*.bin
+	printf("ANA Dump before Init:\n");
+	dumpana();
 
-.c.o:
-	@echo [$(notdir $<)]
-	@$(CC) $(CFLAGS) -c -o $@ $*.c
+	// linux needs this
+	synchronize_timebases();
+	
+	// irqs preinit (SMC related)
+	*(volatile uint32_t*)0xea00106c = 0x1000000;
+	*(volatile uint32_t*)0xea001064 = 0x10;
+	*(volatile uint32_t*)0xea00105c = 0xc000000;
 
-.S.o:
-	@echo [$(notdir $<)]
-	@$(CC) $(AFLAGS) -c -o $@ $*.S
+	xenon_smc_start_bootanim();
 
-xell-gggggg.elf: CURRENT_TARGET = HACK_GGGGGG
-xell-1f.elf xell-2f.elf: CURRENT_TARGET = HACK_JTAG
+	// flush console after each outputted char
+	setbuf(stdout,NULL);
 
-xell-gggggg_cygnos_demon.elf: CURRENT_TARGET = HACK_GGGGGG
-xell-gggggg_cygnos_demon.elf: CYGNOS_DEF = -DCYGNOS
-xell-1f_cygnos_demon.elf xell-2f_cygnos_demon.elf: CURRENT_TARGET = HACK_JTAG
-xell-1f_cygnos_demon.elf xell-2f_cygnos_demon.elf: CYGNOS_DEF = -DCYGNOS
+	xenos_init(VIDEO_MODE_AUTO);
 
-%.elf: $(LV1_DIR)/%.lds $(OBJS)
-	@$(CC) -n -T $< $(LDFLAGS) -o $@ $(OBJS)
+	printf("ANA Dump after Init:\n");
+	dumpana();
 
-%.bin:
-# Build stage 1
-	@$(MAKE) --no-print-directory $*.elf
-# Build stage 2
-	@rm -f stage2.elf32.gz
-	@rm -rf $(OBJS)
-	@$(MAKE) --no-print-directory -f Makefile_lv2.mk
-	@$(STRIP) stage2.elf32
-	@gzip -n9 stage2.elf32	
-# 256KB - 16KB of stage 2 - FOOTER bytes == 245744
-	@test `stat -L -c %s stage2.elf32.gz` -le 245744 || (echo "stage2.elf32.gz too large!"; exit 1)
-	@$(OBJCOPY) -O binary $*.elf $@
-# Ensure stage1 is small enough (<= 16KB)
-	@test `stat -L -c %s $@` -le 16384 || (echo "Too large"; exit 1)
-	@truncate --size=262128 $@ # 256k - footer size
-	@echo -n "xxxxxxxxxxxxxxxx" >> $@ # add footer
-	@dd if=stage2.elf32.gz of=$@ conv=notrunc bs=16384 seek=1 # inject stage2
+#ifdef SWIZZY_THEME
+	console_set_colors(CONSOLE_COLOR_BLACK,CONSOLE_COLOR_ORANGE); // Orange text on black bg
+#elif defined XTUDO_THEME
+	console_set_colors(CONSOLE_COLOR_BLACK,CONSOLE_COLOR_PINK); // Pink text on black bg
+#elif defined DEFAULT_THEME
+	console_set_colors(CONSOLE_COLOR_BLUE,CONSOLE_COLOR_WHITE); // White text on blue bg
+#else
+	console_set_colors(CONSOLE_COLOR_BLACK,CONSOLE_COLOR_GREEN); // Green text on black bg
+#endif
+	console_init();
+
+	printf("\nXeLL - Xenon linux loader second stage " LONGVERSION "\n");
+    printf("\nBuilt with GCC " GCC_VERSION " and Binutils " BINUTILS_VERSION " \n");
+	do_asciiart();
+
+	//delay(3); //give the user a chance to see our splash screen <- network init should last long enough...
+	
+	xenon_sound_init();
+
+	xenon_make_it_faster(XENON_SPEED_FULL);
+	if (xenon_get_console_type() != REV_CORONA_PHISON) //Not needed for MMC type of consoles! ;)
+	{
+		printf(" * nand init\n");
+		sfcx_init();
+		if (sfc.initialized != SFCX_INITIALIZED)
+		{
+			printf(" ! sfcx initialization failure\n");
+			printf(" ! nand related features will not be available\n");
+			delay(5);
+		}
+	}
+
+	xenon_config_init();
+
+#ifndef NO_NETWORKING
+
+	printf(" * network init\n");
+	network_init();
+
+	printf(" * starting httpd server...");
+	httpd_start();
+	printf("success\n");
+
+#endif
+
+	printf(" * usb init\n");
+	usb_init();
+	usb_do_poll();
+
+	// FIXME: Not initializing these devices here causes an interrupt storm in
+	// linux.
+	printf(" * sata hdd init\n");
+	xenon_ata_init();
+
+#ifndef NO_DVD
+	printf(" * sata dvd init\n");
+	xenon_atapi_init();
+#endif
+
+	mount_all_devices();
+	
+	/*int device_list_size = */ // findDevices();
+
+	/* display some cpu info */
+	printf(" * CPU PVR: %08x\n", mfspr(287));
+
+#ifndef NO_PRINT_CONFIG
+	printf(" * FUSES - write them down and keep them safe:\n");
+	char *fusestr = FUSES;
+	for (i=0; i<12; ++i){
+		u64 line;
+		unsigned int hi,lo;
+
+		line=xenon_secotp_read_line(i);
+		hi=line>>32;
+		lo=line&0xffffffff;
+
+		fusestr += sprintf(fusestr, "fuseset %02d: %08x%08x\n", i, hi, lo);
+	}
+	printf(FUSES);
+
+	print_cpu_dvd_keys();
+	network_print_config();
+#endif
+	/* Stop logging and save it to first USB Device found that is writeable */
+	LogDeInit();
+	//extern char device_list[STD_MAX][10];
+
+	//for (i = 0; i < device_list_size; i++)
+	//{
+	//	if (strncmp(device_list[i], "ud", 2) == 0)
+	//	{
+	//		char tmp[STD_MAX + 8];
+	//		sprintf(tmp, "%sxell.log", device_list[i]);
+	//		if (LogWriteFile(tmp) == 0)
+	//			i = device_list_size;
+	//	}
+	//}
+	
+	// mount_all_devices();
+	ip_addr_t fallback_address;
+	ip4_addr_set_u32(&fallback_address, 0xC0A8015A); // 192.168.1.90
+
+	printf("\n * Looking for files on TFTP...\n\n");
+	for(;;){
+		tftp_loop(boot_server_name()); //less likely to find something...
+		tftp_loop(fallback_address);
+		fileloop();
+		
+		console_clrline();
+	}
+
+	return 0;
+}
+
